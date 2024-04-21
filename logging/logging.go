@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"runtime"
+
+	"go.elastic.co/apm"
 )
 
 type Logger interface {
@@ -25,15 +27,15 @@ func Debug(ctx context.Context, msg string, data ...map[string]interface{}) {
 }
 
 func Info(ctx context.Context, msg string, data ...map[string]interface{}) {
-	logger.Log(msg, 6, mergeMaps(collectData(), mergeMaps(data...)))
+	logger.Log(msg, 6, mergeMaps(collectData(ctx), mergeMaps(data...)))
 }
 
 func Error(ctx context.Context, msg string, data ...map[string]interface{}) {
-	logger.Log(msg, 3, mergeMaps(collectData(), mergeMaps(data...)))
+	logger.Log(msg, 3, mergeMaps(collectData(ctx), mergeMaps(data...)))
 }
 
 func Fatal(ctx context.Context, msg string, data ...map[string]interface{}) {
-	logger.Log(msg, 1, mergeMaps(collectData(), mergeMaps(data...)))
+	logger.Log(msg, 1, mergeMaps(collectData(ctx), mergeMaps(data...)))
 	os.Exit(1)
 }
 
@@ -51,10 +53,21 @@ func mergeMaps(datas ...map[string]interface{}) map[string]interface{} {
 	return merged
 }
 
-func collectData() map[string]interface{} {
-	_, file, no, _ := runtime.Caller(2)
-	return map[string]interface{}{
-		"FILE": file,
-		"LINE": no,
+func collectData(ctx context.Context) map[string]interface{} {
+	labels := map[string]interface{}{}
+	// Completely stolen from documentation, https://www.elastic.co/guide/en/apm/agent/go/current/log-correlation-ids.html
+	// Some slight modifications to create correct types
+	tx := apm.TransactionFromContext(ctx)
+	if tx != nil {
+		traceContext := tx.TraceContext()
+		labels["trace.id"] = traceContext.Trace.String()
+		labels["transaction.id"] = traceContext.Span.String()
+		if span := apm.SpanFromContext(ctx); span != nil {
+			labels["span.id"] = span.TraceContext().Span.String()
+		}
 	}
+	_, file, no, _ := runtime.Caller(2)
+	labels["FILE"] = file
+	labels["LINE"] = no
+	return labels
 }
